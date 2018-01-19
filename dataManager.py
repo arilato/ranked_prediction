@@ -13,7 +13,7 @@ API_KEY_LIST = ["api_key=RGAPI-cdf44912-8580-4a03-ae38-b63daac8a1c8",
                 "api_key=RGAPI-7fda51d1-d6a4-4ffc-8c01-83a2a2b7b6be",
                 "api_key=RGAPI-98ecaf7a-4306-433c-8a3d-002c1a9bd3b2",
                 "api_key=RGAPI-01de53eb-47e5-4af8-a6a4-de5ab0a0cbaf"]
-API_KEY_CHAMPIONGG = "api_key=977d33e558311e9fcd259e4314d4115d"
+API_KEY_CHAMPIONGG = "api_key=977d33e558311e9fcd259e4314d4115c"
 
 SELF_ID = 37871085 #my account id for idioticfuse, this will be the seed
 unix_time_limit = 0.5 #this is the maximum number of days that can pass for the match to be valid as a sample point, so we only get recent matches.

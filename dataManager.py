@@ -9,14 +9,14 @@ import sys
 API_BASE = "https://na1.api.riotgames.com/lol/"
 API_BASE_CHAMPIONGG = "http://api.champion.gg/v2/champions/"
 API_KEY = "api_key=RGAPI-8fedf7f8-7c95-43ca-a638-1090b1d32126"
-API_KEY_LIST = ["api_key=RGAPI-e7c017b9-758e-4351-970b-4674d3803bc3",
-                "api_key=RGAPI-d775fedb-80ca-433b-a3d8-3a3410b9ab0c",
-                "api_key=RGAPI-2ef050f6-6073-4e0f-ac93-39f922c69e1d",
-                "api_key=RGAPI-c9fdeb0a-58ab-4f80-bbfc-5dbb455bc970"]
-API_KEY_CHAMPIONGG = "api_key=977d33e558311e9fcd259e4314d4115c"
+API_KEY_LIST = ["api_key=RGAPI-cdf44912-8580-4a03-ae38-b63daac8a1c8",
+                "api_key=RGAPI-7fda51d1-d6a4-4ffc-8c01-83a2a2b7b6be",
+                "api_key=RGAPI-98ecaf7a-4306-433c-8a3d-002c1a9bd3b2",
+                "api_key=RGAPI-01de53eb-47e5-4af8-a6a4-de5ab0a0cbaf"]
+API_KEY_CHAMPIONGG = "api_key=977d33e558311e9fcd259e4314d4115d"
 
 SELF_ID = 37871085 #my account id for idioticfuse, this will be the seed
-unix_time_limit = 2 #this is the maximum number of days that can pass for the match to be valid as a sample point, so we only get recent matches.
+unix_time_limit = 0.5 #this is the maximum number of days that can pass for the match to be valid as a sample point, so we only get recent matches.
 
 #request url constants
 MATCHES_REQUEST_ACCOUNT = API_BASE + "match/v3/matchlists/by-account/"
@@ -49,8 +49,8 @@ WIN_LOSS_LIST = ["Loss", "Win"]
 
 INDIVIDUAL_FEATURES = ["champion_winrate", "champion_playrate", "champion_percentRolePlayed",
                        "champion_overallPerformanceScore", "champion_matchupWinrate", "wins_last2",
-                       "wins_last10", "gamesPlayed", "championPoints", "summonerLevel",
-                       "rank"]
+                       "wins_last15", "gamesPlayed", "gamesPlayedRanked", "lanePlayed",
+                       "lanePlayedRanked", "championPoints", "summonerLevel", "rank"]
 TEAM_FEATURES = ["win"]
 FULL_FEATURES = [i+"_"+j for i,j in itertools.product(ROLE_LIST,INDIVIDUAL_FEATURES)]
 FULL_FEATURES.extend(TEAM_FEATURES)
@@ -71,15 +71,78 @@ def get_request(url):
         time.sleep(1.2)
         cur_api = 0
     if req.status_code != 200:
-        print("Request error: ", req.status_code)
+        print("Request error: ", req.status_code, cur_api-1)
         return -1
     return req.json()
 
+#riot's system has a hard time determining adc from support, and sometimes lists both roles as 'DUO'.
+#To combat this, the following function takes two champion ids, and returns which has a higher playrate as
+#an adc
+
+def get_adc(champ1, champ2):
+    req1 = requests.get(API_BASE_CHAMPIONGG+str(champ1)+CHAMPION_REQUEST_GG+"&"+API_KEY_CHAMPIONGG)
+    req2 = requests.get(API_BASE_CHAMPIONGG+str(champ2)+CHAMPION_REQUEST_GG+"&"+API_KEY_CHAMPIONGG)
+    #error
+    time.sleep(0.2)
+    if req1.status_code != 200 or req2.status_code != 200:
+        raise NameError()
+    data1 = req1.json()
+    data2 = req2.json()
+
+    playrate1, playrate2 = 0, 0
+    for i in data1:
+        if i['_id']['role'] == 'DUO_CARRY':
+            playrate1 = i['playRate']
+            break
+    for i in data2:
+        if i['_id']['role'] == 'DUO_CARRY':
+            playrate2 = i['playRate']
+            break
+
+    if playrate1 < playrate2: return champ2
+    else: return champ1
+
+
 '''
     This function takes in a sample, and transforms it into another sample using its existing features.
+    For reference, existing features are, TOP, JG, MID, ADC, SUP, with each having
+    (0)champion_winrate, (1)champion_playrate, (2)champion_percentRolePlayed, (3)champion_overallPerformanceScore,
+    (4)champion_matchupWinrate, (5)wins_last2, (6)wins_last15, (7)gamesPlayed, (8)gamesPlayedRanked, (9)lanePlayed,
+    (10)lanePlayedRanked, (11)championPoints, (12)summonerLevel, (13)rank
+    14 total original features per role
 '''
-def transform_features():
-    pass
+def transform_features(sample, trans=True, player_winrate_only=False, champion_winrate_only=False, rank_only=False,
+                       gamesPlayedRanked=False, gamesPlayed=False, lanePlayed=False):
+    newsample = []
+    if champion_winrate_only == True:
+        newsample.extend([sample[i*14] for i in range(5)])
+    if player_winrate_only == True:
+        newsample.extend([sample[6+i*14] for i in range(5)])
+    if gamesPlayed == True:
+        newsample.extend([sample[7+i*14] for i in range(5)])
+    if gamesPlayedRanked == True:
+        newsample.extend([sample[8+i*14] for i in range(5)])
+    if lanePlayed == True:
+        newsample.extend([sample[9+i*14] for i in range(5)])
+    if rank_only == True:
+        newsample.extend([sample[13+i*14] for i in range(5)])
+    
+    if trans == True:
+        n_features = 14
+        new_features = [[] for i in range(5)]
+        for i in range(5):
+            #New feature: player_transformed_winrate = wins_last15/min(gamesPlayedRanked, 15)
+            new_features[i].append(sample[6+i*14]/max(min(15,sample[8+i*14]),1))
+            #New feature: player_compared_winrate = champion_winrate - player_transformed_winrate
+            new_features[i].append(sample[i*14]-new_features[i][0])
+        #Testing removal of certain features
+        #Remove summonerLevel
+        sample = np.delete(sample, [12+i*14 for i in range(5)]).tolist()
+        
+        #add new features to sample
+        sample.extend(np.array(new_features).flatten())
+        newsample = sample
+    return newsample
 
 '''
 given two champion ids and rank as a string, returns two dictionaries:
@@ -135,7 +198,7 @@ def generate_champion_data(champion1, champion2, rank, role):
 '''
 given a player id and champion id, compiles the last 500 games by the player, and returns the following dictionary:
 wins_last2(ranked) - feature for tilt
-wins_last10(ranked)*
+wins_last15(ranked)*
 gamesplayed(ranked)*
 championPoints*
 summonerLevel
@@ -146,17 +209,14 @@ Total API Requests: 18(Riot)
 def generate_player_features(player, championId, matchId):
     player_dict = {} #setup dictionary that we will return
     req = get_request(SUMMONER_REQUEST+str(player)+"?") #gets summoner id and level
-    if req == -1: return -1
     player_dict['summonerId'] = req['id']
     player_dict['summonerLevel'] = req['summonerLevel']
     
     #gets champion points
     req = get_request(MASTERY_REQUEST+str(player_dict['summonerId'])+"/by-champion/"+str(championId)+"?")
-    if req == -1: return -1
     player_dict['championPoints'] = req['championPoints']
     
     req = get_request(LEAGUE_REQUEST+str(player_dict['summonerId'])+"?") #gets rank of player
-    if req == -1: return -1
     for i in req:
         if i['queueType'] == "RANKED_SOLO_5x5":
             player_dict['rank'] = TIER_ORDER[i['tier']]*500+(4-RANK_ORDER[i['rank']])*100+i['leaguePoints']
@@ -165,24 +225,30 @@ def generate_player_features(player, championId, matchId):
     
     #now, we go through the last 200 ranked games played, and generate the rest of the features
     player_dict['gamesPlayed'] = 0
+    player_dict['gamesPlayedRanked'] = 0
+    player_dict['lanePlayed'] = 0
+    player_dict['lanePlayedRanked'] = 0
     player_dict['wins_last2'] = 0
-    player_dict['wins_last10'] = 0
+    player_dict['wins_last15'] = 0
     games_recorded = 0
     tilt_recorded = 0
     flag = False
+    lane = "none"
     if matchId == -1: flag = True
     for i in [0, 100, 200]:
-        req = get_request(MATCHES_REQUEST_ACCOUNT+str(player)+"?queue=420&beginIndex="+str(i)+"&")
-        if req == -1: return -1
+        req = get_request(MATCHES_REQUEST_ACCOUNT+str(player)+"?beginIndex="+str(i)+"&")
         for j in req['matches']:
             if j['gameId'] == matchId:
                 flag = True
+                lane = j['lane']
                 continue
-            if flag == False: continue
+            if flag == False:
+                continue
+            if j['champion'] == championId: player_dict['gamesPlayed'] += 1
+            if j['lane'] == lane: player_dict['lanePlayed'] += 1
             if tilt_recorded < 2:
                 tilt_recorded += 1
                 req2 = get_request(MATCHES_REQUEST_MATCHID+str(j['gameId'])+'?')
-                if req2 == -1: return -1
                 for k in req2['participantIdentities']:
                     if k['player']['accountId'] == player: #found a match
                         if k['participantId'] < 6:
@@ -190,25 +256,33 @@ def generate_player_features(player, championId, matchId):
                         else:
                             player_dict['wins_last2'] += WIN_LOSS_ORDER[req2['teams'][1]['win']]
                         break
+    flag = False
+    for i in [0, 100, 200]:
+        req = get_request(MATCHES_REQUEST_ACCOUNT+str(player)+"?queue=420&beginIndex="+str(i)+"&")
+        for j in req['matches']:
+            if j['gameId'] == matchId:
+                flag = True
+                continue
+            if flag == False: continue
+            if j['lane'] == lane: player_dict['lanePlayedRanked'] += 1
             if j['champion'] != championId: continue #we don't care about games not involving our champion
-            if games_recorded < 10: #if part of most recent 10 games, we have to find wins
+            if games_recorded < 15: #if part of most recent 10 games, we have to find wins
                 games_recorded += 1
                 req2 = get_request(MATCHES_REQUEST_MATCHID+str(j['gameId'])+'?')
-                if req2 == -1: return -1
                 for k in req2['participantIdentities']:
                     if k['player']['accountId'] == player: #found a match
                         if k['participantId'] < 6:
-                            player_dict['wins_last10'] += WIN_LOSS_ORDER[req2['teams'][0]['win']]
+                            player_dict['wins_last15'] += WIN_LOSS_ORDER[req2['teams'][0]['win']]
                         else:
-                            player_dict['wins_last10'] += WIN_LOSS_ORDER[req2['teams'][1]['win']]
+                            player_dict['wins_last15'] += WIN_LOSS_ORDER[req2['teams'][1]['win']]
                         break
-            player_dict['gamesPlayed'] += 1
+            player_dict['gamesPlayedRanked'] += 1
     return player_dict
 
 '''
 Given a match id, generates two feature sets for that match - one for each team. The features we are interested in are:
 wins_last2(ranked). - feature for tilt
-wins_last10(ranked)*.
+wins_last15(ranked)*.
 gamesplayed(ranked)*.
 championPoints*.
 summonerLevel.
@@ -235,12 +309,31 @@ def generate_featureset(match):
     team[1]['win'] = WIN_LOSS_ORDER[match_data['teams'][1]['win']]
     
     participantId_index_dict = {}
+    duo_pairs = [[], []]
+    adc_index = [-1, -1]
+    for i in match_data['participants']:
+        if i['timeline']['role'] == 'DUO':
+            if i['participantId'] < 6: duo_pairs[0].append(i['championId'])
+            else: duo_pairs[1].append(i['championId'])
+    if len(duo_pairs[0]) == 1 or len(duo_pairs[1]) == 1:
+        print("Unequal unmarked duo lane assignment, sample discarded.")
+        raise NameError()
+    
+    for i in range(2):
+        if len(duo_pairs[i]) == 2:
+            adc = get_adc(duo_pairs[i][0], duo_pairs[i][1])
+            for j in match_data['participants']:
+                if j['timeline']['role'] == 'DUO' and j['participantId'] > 5*i and j['participantId'] < 6+5*i:
+                    if j['championId'] == adc: j['timeline']['role'] = 'DUO_CARRY'
+                    else: j['timeline']['role'] = 'DUO_SUPPORT'
+
+    
     for i in match_data['participants']: #generates player specific dictionary values
+        if i['participantId'] < 6: teamId = 0
+        else: teamId = 1
         if i['timeline']['lane'] == "BOTTOM": index = ROLE_ORDER[i['timeline']['role']] #generate index based on role
         else: index = ROLE_ORDER[i['timeline']['lane']]
         participantId_index_dict[i['participantId']] = index
-        if i['participantId'] < 6: teamId = 0
-        else: teamId = 1
         
         team[teamId][ROLE_LIST[index]] = {'role':index}
         team[teamId][ROLE_LIST[index]]['spell1Id'] = i['spell1Id']
@@ -252,7 +345,9 @@ def generate_featureset(match):
     #with the current data, we will simply discard it
     for i in range(2):
         for j in ROLE_LIST:
-            if j not in team[i]: raise NameError("Match Skipped due to inaccurate role assignments")
+            if j not in team[i]:
+                print("Match Skipped due to inaccurate role assignments")
+                raise NameError()
     
     for i in match_data['participantIdentities']: #generates account ids for each player
         if i['participantId'] < 6: teamId = 0
@@ -388,10 +483,10 @@ def get_ids(origin_id, thresh_size, lim, cont=False): #note: this only collects 
     df_id.to_csv(USER_ID_FILE_PATH)
     df_matches.to_csv(MATCH_ID_FILE_PATH)
 
-
-#generate_data(lim=750,cont=True)
-get_ids(SELF_ID, thresh_size=10000, lim=2400, cont=True)
-#print(generate_featureset(2680651793))
+if __name__ == "__main__":
+    #generate_data(lim=750,cont=True)
+    get_ids(SELF_ID, thresh_size=100000, lim=3600, cont=True)
+    #print(generate_featureset(2680651793))
 
 
 

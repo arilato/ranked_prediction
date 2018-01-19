@@ -10,3 +10,5 @@ Grid_search.py - The bulk of our project. Performs grid search and saves models,
 plots model performance.
 
 Predict.py - Unfinished.
+
+Report.pdf - Our project report

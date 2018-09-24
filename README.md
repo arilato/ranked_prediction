@@ -11,4 +11,4 @@ plots model performance.
 
 Predict.py - Unfinished.
 
-Report.pdf - Our project report
+Report.pdf - The project report
